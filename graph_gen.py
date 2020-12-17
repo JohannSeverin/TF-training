@@ -1,6 +1,7 @@
 import numpy as np
-import os, sqlite3
+import os, sqlite3, pickle
 from tqdm import tqdm
+import os.path as osp
 
 from pandas import read_sql
 from sklearn.preprocessing import normalize
@@ -13,28 +14,13 @@ class IC_graphs(Dataset):
     A class to convert the db files to a graph
     """
     def __init__(self, n_data = None, **kwargs):
-       
-        # Call super class 
         self.n_data = n_data
-        
         super().__init__(**kwargs)
 
 
     def read(self):
     # We must return a list of Graph objects
-        output = []
-
-        self.n_data = len(os.listdir(os.path.join(self.path)))
-
-        print("Loading data")
-        for i in tqdm(range(self.n_data)):
-            data = np.load(os.path.join(self.path, f'graph_{i}.npz'), allow_pickle=True)
-            
-            output.append(
-                Graph(x=data['x'], a=data['a'], e = data['e'], y=data['y'])
-            )
-        print("Data loaded")
-
+        output = pickle.load(open(self.path + "/IC_graphs.dat", 'rb'))
         return output
 
 
@@ -58,24 +44,20 @@ class IC_graphs(Dataset):
         node_cols = ["dom_x", "dom_y", "dom_z", "dom_charge", "dom_time"]
         event_no = seq.event_no.unique()[sca.event_no.isin(sca.event_no)]
 
+        # Graph making loop
         print("Making Graphs")
+        graph_list = []
         for i in tqdm(range(len(event_no))):
+            # Take id from list and make array of X array
             id      = event_no[i]
             x       = np.array(seq.loc[seq.event_no == id, node_cols])
             pos     = x[:, :3]
             time    = x[:,  4]
 
+            # Adjacency Matrix
             A       = knn(pos, k_neighbors)
-
-
-            node_cols = ["dom_x", "dom_y", "dom_z", "dom_charge", "dom_time"]
-
-            x       = np.array(seq.loc[seq.event_no == id, node_cols])
-            pos     = x[:, :3]
-            time    = x[:,  4]
-
-            a       = knn(pos, k_neighbors)
-
+            
+            # Steup note attributes
             send    = np.repeat(np.arange(A.shape[0]), k_neighbors)
             receive = A.indices
 
@@ -83,14 +65,22 @@ class IC_graphs(Dataset):
             vects = normalize(pos[receive] - pos[send])
             dts   = time[receive] - time[send]
 
-            e = np.vstack([dists, dts, vects.T])
+            e = np.vstack([dists, dts, vects.T]).T
 
-            y = np.array(sca.loc[sca.event_no == 1])[:, 1:].flatten()
+            y = np.array(sca.loc[sca.event_no == id, :])
+            y = np.array(y[0][1])
 
-            filename = os.path.join(self.path, f'graph_{i}')
-            np.savez(filename, x=x, a=a, e = e, y=y)
-
+            # filename = os.path.join(self.path, f'graph_{i}')
+            graph_list.append(Graph(x, A, e, y))
+            # np.savez(filename, x=x, a=a, e = e, y=y)
+        
+        print("Saving")
+        pickle.dump(graph_list, open(self.path + "/IC_graphs.dat", 'wb'))
         self.data_n = len(event_no)
+    
+    @property
+    def path(self):
+        return osp.expanduser("~/data/IC_graph")
 
 
 
@@ -99,8 +89,8 @@ class IC_graphs(Dataset):
 
 
 if __name__ == "__main__":
-    os.system("rm -rf /home/johann/.spektral/datasets/IC_graphs")
-    X = IC_graphs(10000)
+    os.system("rm -rf ~/home/johann/data/IC_graphs")
+    X = IC_graphs()
 
 
 
